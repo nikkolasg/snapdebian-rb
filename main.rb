@@ -8,7 +8,10 @@ require_relative 'log'
 require_relative 'scrapper'
 require_relative 'processor'
 
-$opts = {:packages => [],:since => Time.new(2005,03,12),:until => Time.now }
+$opts = {:packages => [],
+         :since => Time.new(2005,03,12),
+         :until => Time.now ,
+         :folder => "snapshots"}
 
 parser = OptionParser.new do |opts|
     opts.banner = "Debian snapshot scrapper"
@@ -45,16 +48,19 @@ def main
     $logger.info "Crawling range #{$opts[:since]} to #{$opts[:until]}"
     scrapper =  Scrapper.new $opts[:packages], $opts[:since], $opts[:until]
     links = scrapper.scrap
-    $logger.debug "Links found: #{links.map{&:to_s}}"
-    processor = Processor.new $opts[:folder],$opts[:packages]
-    processor.process links.take(1)
+    formatter = Formatter.new $opts[:packages]
+    Processor.go $opts[:folder] do |proc|
+        formatter.format links do |snap|
+            #processor.push snap
+        end
+    end
 end
 
 def help
- puts 'This ruby script will parse the website http://snapshot.debian.org/.
+    puts 'This ruby script will parse the website http://snapshot.debian.org/.
 It takes a list of packages it needs to crawl, a start date and a end date.
 The output is a csv file which is organized as:
-snapshot_time, pkgName, version, hashBinary
+snapshot_time, pkgName, version
 
 For the purpose of this experiment, this script creates a hierarchy of folders
 pkgName/version/policy.txt
@@ -67,5 +73,5 @@ Where policy.txt contains:
  * hash of binary
 & signatures is a list of /random + fake/ pgp signatures concatenated to this file.'
 end
- 
+
 main
