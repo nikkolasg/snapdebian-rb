@@ -24,7 +24,13 @@ module Scrapper
             agent = Mechanize.new
             flinks = links 
             $logger.info "Found #{flinks.size} snapshots falling between given dates" 
-            $logger.debug "Downloading files into #{@folder}"
+            # create the full links by appending the path for binary + source
+            # Hash[snapshotTime] = { :binary => *link*, :source => *link* }
+            flinks.inject(Hash.new{ |h,k| h[k] = {}}) do |h,link|
+                h[link.text][:binary] = URI.join(@agent.page.uri.merge(link.uri),PATH,BINARY_PATH)
+                h[link.text][:source] = URI.join(@agent.page.uri.merge(link.uri),PATH,BINARY_PATH)
+                h
+            end
         end
 
         private 
@@ -41,6 +47,7 @@ module Scrapper
                 year,month = $1,$2
                 t = Time.strptime("#{year}-#{month}","%Y-%m")
                 v = t >= from_rounded && t <= from_rounded
+                #$logger.debug "#{to_rounded} < #{year}-#{month} < #{from_rounded} => #{v}"
                 v
             end
             seconds = first_links.inject([]) do |acc,link|
@@ -48,8 +55,8 @@ module Scrapper
                 ## select all valid time links
                 page.links.each do |timeLink|
                     begin
-                        Time.parse timeLink.text
-                        acc << timeLink
+                        exact = Time.parse timeLink.text
+                        acc << timeLink if @from <= exact && exact <= @to
                     rescue
                         next 
                     end

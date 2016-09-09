@@ -40,7 +40,8 @@ def main
     check_args
     $logger.info "Crawling range #{$opts[:since]} to #{$opts[:until]}"
     scrapper =  Scrapper::Snapshots.new $opts[:packages], $opts[:since], $opts[:until]
-    scrapper.scrap
+    links =     scrapper.scrap
+    $logger.debug "Links found: #{links}"
     
 end
 
