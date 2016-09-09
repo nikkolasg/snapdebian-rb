@@ -8,66 +8,64 @@ PATH = "dists/stretch/main/"
 BINARY_PATH = "binary-amd64/Packages.xz"
 SOURCE_PATH = "source/Sources.xz"
 
-module Scrapper
+class Scrapper
 
-    class Snapshots
 
-        def initialize packages,from,to
-            @packages = packages
-            @from = from
-            @to = to
-            @agent = Mechanize.new
-            @folder = $opts[:folder] || "snapshots"
-        end
+    def initialize packages,from,to
+        @packages = packages
+        @from = from
+        @to = to
+        @agent = Mechanize.new
+        @folder = $opts[:folder] || "snapshots"
+    end
 
-        def scrap 
-            agent = Mechanize.new
-            flinks = links 
-            $logger.info "Found #{flinks.size} snapshots falling between given dates" 
-            # create the full links by appending the path for binary + source
-            # Hash[snapshotTime] = { :binary => *link*, :source => *link* }
-            flinks.inject(Hash.new{ |h,k| h[k] = {}}) do |h,link|
-                h[link.text][:binary] = URI.join(@agent.page.uri.merge(link.uri),PATH,BINARY_PATH)
-                h[link.text][:source] = URI.join(@agent.page.uri.merge(link.uri),PATH,BINARY_PATH)
-                h
-            end
-        end
-
-        private 
-
-        # take the main page and find the range links for year + months 
-        # + days + hours
-        def links
-            from_rounded = Scrapper::round_time @from
-            to_rounded = Scrapper::round_time @to
-            first_links = @agent.get(SNAPSHOT_URL).links_with(href: /.\/?year=/) 
-            # filter by year-month from < "year-month" > to
-            first_links.select! do |links| 
-                links.href =~ /.\/?year=([0-9]{4})&month=([0-9]{1,2})/
-                year,month = $1,$2
-                t = Time.strptime("#{year}-#{month}","%Y-%m")
-                v = t >= from_rounded && t <= from_rounded
-                #$logger.debug "#{to_rounded} < #{year}-#{month} < #{from_rounded} => #{v}"
-                v
-            end
-            seconds = first_links.inject([]) do |acc,link|
-                page = link.click
-                ## select all valid time links
-                page.links.each do |timeLink|
-                    begin
-                        exact = Time.parse timeLink.text
-                        acc << timeLink if @from <= exact && exact <= @to
-                    rescue
-                        next 
-                    end
-                end
-                acc
-            end
-            seconds
+    def scrap 
+        agent = Mechanize.new
+        flinks = links 
+        $logger.info "Found #{flinks.size} snapshots falling between given dates" 
+        # create the full links by appending the path for binary + source
+        # Hash[snapshotTime] = { :binary => *link*, :source => *link* }
+        flinks.inject(Hash.new{ |h,k| h[k] = {}}) do |h,link|
+            h[link.text][:binary] = URI.join(@agent.page.uri.merge(link.uri),PATH,BINARY_PATH)
+            h[link.text][:source] = URI.join(@agent.page.uri.merge(link.uri),PATH,SOURCE_PATH)
+            h
         end
     end
 
-    def self.round_time time, year=true, month= true
+    private 
+
+    # take the main page and find the range links for year + months 
+    # + days + hours
+    def links
+        from_rounded = round_time @from
+        to_rounded = round_time @to
+        first_links = @agent.get(SNAPSHOT_URL).links_with(href: /.\/?year=/) 
+        # filter by year-month from < "year-month" > to
+        first_links.select! do |links| 
+            links.href =~ /.\/?year=([0-9]{4})&month=([0-9]{1,2})/
+            year,month = $1,$2
+            t = Time.strptime("#{year}-#{month}","%Y-%m")
+            v = t >= from_rounded && t <= from_rounded
+            #$logger.debug "#{to_rounded} < #{year}-#{month} < #{from_rounded} => #{v}"
+            v
+        end
+        seconds = first_links.inject([]) do |acc,link|
+            page = link.click
+            ## select all valid time links
+            page.links.each do |timeLink|
+                begin
+                    exact = Time.parse timeLink.text
+                    acc << timeLink if @from <= exact && exact <= @to
+                rescue
+                    next 
+                end
+            end
+            acc
+        end
+        seconds
+    end
+
+    def round_time time, year=true, month= true
         format = "" 
         toParse = ""
         if year
