@@ -6,6 +6,7 @@ require_relative'log'
 class Snapshot
 
     attr_accessor :packages
+    attr_accessor :time
 
     def initialize time,packages
         @time = Time.parse time
@@ -41,6 +42,9 @@ class Formatter
     require 'open-uri'
     require_relative 'ruby_util'
     require 'etc'
+    require 'set'
+    ## workaround see https://github.com/celluloid/timers/issues/20
+    SortedSet.new
 
     def initialize folder,packages = nil,csv = nil
         @folder = folder
@@ -57,12 +61,28 @@ class Formatter
         @file = File.open(@csv,"w") 
         @file.write "time, name, version, hash_source, hash_binary\n"
         @file.flush
-        RubyUtil::partition_by_size(links.keys,1) do |times|
-            times.each do |time|
-                v = links[time]
-                snapshot = process_snapshot time,v[:source],v[:binary]
-                append snapshot
+        threads = []
+        RubyUtil::partition_by_size(links.keys,Etc.nprocessors) do |times|
+            threads << Thread.new do  
+                Thread.current[:times] = SortedSet.new
+                times.each do |time|
+                    v = links[time]
+                    snapshot = process_snapshot time,v[:source],v[:binary]
+                    timeFileName = File.join(@folder,snapshot.time_format)
+                    append timeFileName,snapshot
+                    Thread.current[:times] << snapshot.time
+                end
             end
+        end
+        # wait all threads
+        files = SortedSet.new
+        threads.each { |t| t.join; files = files + t[:times] }
+        puts "Time-files made by the threads #{files.to_a}"
+        # append all files together 
+        files.each do |time|
+            fname = File.join(@folder,time.strftime("%Y%m%d%H%M%S"))
+            IO.copy_stream(open(fname),@file)
+            File.delete fname
         end
         @file.close
         $logger.info "Insert #{`cat #{@csv} | wc -l`.strip} lines in the #{@csv}"
@@ -70,7 +90,8 @@ class Formatter
 
     private
 
-    def append snapshot
+    def append fileName,snapshot
+        File.open(fileName,"w") do |f|
         snapshot.packages.each do |p,info|
             str = [snapshot.time_format,p,info[:version],info[:hash_source],info[:hash_binary]].join(",")
             if info[:version].nil? || info[:version].empty? || info[:hash_source].nil? || info[:hash_source].empty?
@@ -78,7 +99,8 @@ class Formatter
                 sleep 1
                 next
             end
-            @file.write str + "\n"
+            f.write str + "\n"
+        end
         end
     end
     ## create_snapshot takes links to source.xz file & binary.xz file. It
@@ -159,6 +181,7 @@ class Formatter
 
     ## process_link takes a link and a block and yield each paragraphs as objects.
     def process_link link
+        nb_skipped = 0
         cache_or_download link do |reader|
             parser = DebianControlParser.new reader
             parser.paragraphs do |p|
@@ -168,11 +191,13 @@ class Formatter
                     obj[n] = value
                 end
                 if @packages && !@packages.empty? && !@packages.include?(obj[:package])
+                    nb_skipped += 1
                     next
                 end
                 yield obj
             end
         end
+        $logger.debug "Skipped #{nb_skipped} packages not in the given list"
     end
 
     def slice(hash, *keys)
@@ -193,7 +218,5 @@ class Formatter
         raise "no file inside link" unless link.to_s.match p
         return $1
     end
-
-
 end
 
