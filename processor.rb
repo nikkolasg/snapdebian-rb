@@ -65,7 +65,7 @@ class Formatter
             end
         end
         @file.close
-        $logger.info "Insert #{`cat #{@csv} | wc -l`} lines in the #{@csv}"
+        $logger.info "Insert #{`cat #{@csv} | wc -l`.strip} lines in the #{@csv}"
     end
 
     private
@@ -73,7 +73,7 @@ class Formatter
     def append snapshot
         snapshot.packages.each do |p,info|
             str = [snapshot.time_format,p,info[:version],info[:hash_source],info[:hash_binary]].join(",")
-            if info[:version].empty? || info[:hash_source].empty?
+            if info[:version].nil? || info[:version].empty? || info[:hash_source].nil? || info[:hash_source].empty?
                 puts "EMPTY #{p} => #{info}"
                 sleep 1
                 next
@@ -111,6 +111,8 @@ class Formatter
             p[:hash_binary] = formatted[:hash_binary]
             nb_binaries += 1
         end
+        # only select matching packages source + version
+        packages.delete_if { |k,v| v[:hash_binary].nil? || v[:hash_source].nil? }
         $logger.debug "Found #{nb_binaries} binaries and #{nb_mismatch} mismatches"
         $logger.debug "Example #{packages[packages.keys.first]}"
         return Snapshot.new(time,packages)
