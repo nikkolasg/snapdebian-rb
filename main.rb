@@ -56,18 +56,7 @@ def help
     puts 'This ruby script will parse the website http://snapshot.debian.org/.
 It takes a list of packages it needs to crawl, a start date and a end date.
 The output is a csv file which is organized as:
-snapshot_time, pkgName, version
-
-For the purpose of this experiment, this script creates a hierarchy of folders
-pkgName/version/policy.txt
-                signatures.txt
-Where policy.txt contains: 
- * package name
- * version
- * public PGP-keys
- * threshold
- * hash of binary
-& signatures is a list of /random + fake/ pgp signatures concatenated to this file.'
+snapshot_time, pkgName, version'
 end
 
 main

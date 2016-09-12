@@ -62,21 +62,30 @@ class Formatter
         @file.write "time, name, version, hash_source, hash_binary\n"
         @file.flush
         threads = []
-        RubyUtil::partition_by_size(links.keys,Etc.nprocessors) do |times|
-            threads << Thread.new do  
+        idx = 1
+        RubyUtil::partition_by_size(links.keys,2) do |times|
+            threads << Thread.new(times,idx) do |ttimes,i|
+                Thread.current[:name] = i
                 Thread.current[:times] = SortedSet.new
-                times.each do |time|
+                $logger.debug "Started thread on #{ttimes.size}/#{links.keys.size} of the snapshots"
+                ttimes.each do |time|
                     v = links[time]
                     snapshot = process_snapshot time,v[:source],v[:binary]
                     timeFileName = File.join(@folder,snapshot.time_format)
                     append timeFileName,snapshot
                     Thread.current[:times] << snapshot.time
                 end
+                $logger.debug "Finished processing"
             end
+            idx += 1
         end
         # wait all threads
         files = SortedSet.new
-        threads.each { |t| t.join; files = files + t[:times] }
+        threads.each do |t| 
+            $logger.debug "Waiting on thread #{t[:name]}..."
+            t.join
+            files = files + t[:times] 
+        end
         puts "Time-files made by the threads #{files.to_a}"
         # append all files together 
         files.each do |time|
@@ -92,16 +101,17 @@ class Formatter
 
     def append fileName,snapshot
         File.open(fileName,"w") do |f|
-        snapshot.packages.each do |p,info|
-            str = [snapshot.time_format,p,info[:version],info[:hash_source],info[:hash_binary]].join(",")
-            if info[:version].nil? || info[:version].empty? || info[:hash_source].nil? || info[:hash_source].empty?
-                puts "EMPTY #{p} => #{info}"
-                sleep 1
-                next
+            snapshot.packages.each do |p,info|
+                str = [snapshot.time_format,p,info[:version],info[:hash_source],info[:hash_binary]].join(",")
+                if info[:version].nil? || info[:version].empty? || info[:hash_source].nil? || info[:hash_source].empty?
+                    puts "EMPTY #{p} => #{info}"
+                    sleep 1
+                    next
+                end
+                f.write str + "\n"
             end
-            f.write str + "\n"
         end
-        end
+        $logger.debug "Wrote snapshot into tmp file #{fileName}"
     end
     ## create_snapshot takes links to source.xz file & binary.xz file. It
     #decompress them, analyzes them and return an snapshot struct
@@ -135,8 +145,8 @@ class Formatter
         end
         # only select matching packages source + version
         packages.delete_if { |k,v| v[:hash_binary].nil? || v[:hash_source].nil? }
-        $logger.debug "Found #{nb_binaries} binaries and #{nb_mismatch} mismatches"
-        $logger.debug "Example #{packages[packages.keys.first]}"
+        $logger.debug "Found #{nb_binaries} binaries and #{nb_mismatch} mismatches for #{time}"
+        #$logger.debug "Example #{packages[packages.keys.first]}"
         return Snapshot.new(time,packages)
     end
 
@@ -162,9 +172,19 @@ class Formatter
     def cache_or_download link
         filen = File.join(@cache,extract_date(link) + "_" + extract_file(link))
         if !File.exists? filen
-            File.open(filen,"w") do |f|
-                open(link,"User-Agent" => "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.92 Safari/537.36") do |l|
-                    IO.copy_stream(l,f)
+            while true do 
+                begin
+                    File.open(filen,"w") do |f|
+                        open(link,"User-Agent" => "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.92 Safari/537.36") do |l|
+                            f.write l.read
+                            #IO.copy_stream(l,f)
+                        end
+                    end
+                    break
+                rescue OpenURI::HTTPError 
+                    $logger.info "Error trying to download #{link.to_s}"
+                    sleep 0.2
+                    next
                 end
             end
             $logger.debug "File #{filen} has been downloaded"

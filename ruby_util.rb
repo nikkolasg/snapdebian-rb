@@ -38,7 +38,6 @@ module RubyUtil
 
         counter = collection.size / chunk_size
         rest = collection.size % chunk_size
-        puts "RubyUtil::counter = #{counter} & rest #{rest}"
         # yield for each "slice"
         counter.times do |n|
             low = n * chunk_size
