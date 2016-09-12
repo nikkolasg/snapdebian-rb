@@ -48,12 +48,8 @@ def main
     $logger.info "Crawling range #{$opts[:since]} to #{$opts[:until]}"
     scrapper =  Scrapper.new $opts[:packages], $opts[:since], $opts[:until]
     links = scrapper.scrap
-    formatter = Formatter.new $opts[:packages]
-    Processor.go $opts[:folder] do |proc|
-        formatter.format links do |snap|
-            #processor.push snap
-        end
-    end
+    formatter = Formatter.new $opts[:folder],$opts[:packages]
+    formatter.format links 
 end
 
 def help
