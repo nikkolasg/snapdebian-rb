@@ -45,9 +45,10 @@ class Scrapper
             links.href =~ /.\/?year=([0-9]{4})&month=([0-9]{1,2})/
             year,month = $1,$2
             t = Time.strptime("#{year}-#{month}","%Y-%m")
-            v = t >= from_rounded && t <= from_rounded
-            #$logger.debug "#{to_rounded} < #{year}-#{month} < #{from_rounded} => #{v}"
-            v
+            v1 = from_rounded <= t 
+            v2 = t <= to_rounded
+            #$logger.debug "#{from_rounded} < #{t} => #{v1} || < #{to_rounded} => #{v2}"
+            v1 && v2
         end
         seconds = first_links.inject([]) do |acc,link|
             page = link.click
@@ -56,6 +57,7 @@ class Scrapper
                 begin
                     exact = Time.parse timeLink.text
                     acc << timeLink if @from <= exact && exact <= @to
+                    #puts "#{exact} => #{@from <= exact && exact <= @to}"
                 rescue
                     next 
                 end
