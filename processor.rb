@@ -38,6 +38,7 @@ class Formatter
     end
 
     require 'xz'
+    require 'zlib'
     require 'debian_control_parser'
     require 'open-uri'
     require_relative 'ruby_util'
@@ -63,7 +64,7 @@ class Formatter
         @file.flush
         threads = []
         idx = 1
-        RubyUtil::partition_by_size(links.keys,2) do |times|
+        RubyUtil::partition_by_size(links.keys,Etc.nprocessors) do |times|
             threads << Thread.new(times,idx) do |ttimes,i|
                 Thread.current[:name] = i
                 Thread.current[:times] = SortedSet.new
@@ -170,34 +171,50 @@ class Formatter
     end
 
     def cache_or_download link
-        filen = File.join(@cache,extract_date(link) + "_" + extract_file(link))
-        if !File.exists? filen
-            while true do 
-                begin
-                    File.open(filen,"w") do |f|
-                        open(link,"User-Agent" => "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.92 Safari/537.36") do |l|
-                            f.write l.read
-                            #IO.copy_stream(l,f)
+        while true do
+            begin
+            $logger.debug "Trying to download #{ link.to_s}"
+            filen = File.join(@cache,extract_date(link) + "_" + extract_file(link))
+            if !File.exists? filen
+                ##out = `wget --quiet #{link.to_s} -O #{filen} --waitretry=2 --retry-connrefused 2>&1`
+                ##raise "error downloading file (exit #{$?})#{filen}: #{out}" unless $?.exitstatus.to_i != 0
+                while true do 
+                    begin
+                        File.open(filen,"w") do |f|
+                            open(link,"User-Agent" => "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.92 Safari/537.36") do |l|
+                                #f.write l.read
+                                IO.copy_stream(l,f)
+                            end
                         end
+                        break
+                    rescue OpenURI::HTTPError 
+                        $logger.info "Error trying to download #{link.to_s}"
+                        sleep 0.2
+                        next
                     end
-                    break
-                rescue OpenURI::HTTPError 
-                    $logger.info "Error trying to download #{link.to_s}"
-                    sleep 0.2
-                    next
                 end
+                $logger.debug "File #{filen} has been downloaded"
+            else 
+                $logger.debug "File #{filen} is already cached"
             end
-            $logger.debug "File #{filen} has been downloaded"
-        else 
-            $logger.debug "File #{filen} is already cached"
-        end
 
-        File.open(filen,"r") do |f|
-            reader = XZ::StreamReader.new f
-            yield reader
-            reader.finish
+            #File.open(filen,"r") do |f|
+            #    reader = XZ::StreamReader.new f
+            #    yield reader
+            #    reader.finish
+            #end
+            Zlib::GzipReader.open(filen) do |gz|
+                yield gz
+            end
+            break
+        rescue => e
+            $logger.debug "Error downloaded #{link.to_s} => #{e}"
+            File.delete(filen)
+            next
+        end
         end
     end
+
 
     ## process_link takes a link and a block and yield each paragraphs as objects.
     def process_link link

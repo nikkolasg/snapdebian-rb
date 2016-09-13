@@ -5,8 +5,8 @@ require 'mechanize'
 # SNAPSHOT_URL / <timestamp> / PATH / {BINARY_PATH,SOURCE_PATH}
 SNAPSHOT_URL = "http://snapshot.debian.org/archive/debian/"
 PATH = "dists/stretch/main/"
-BINARY_PATH = "binary-amd64/Packages.xz"
-SOURCE_PATH = "source/Sources.xz"
+BINARY_PATH = "binary-amd64/Packages.gz"
+SOURCE_PATH = "source/Sources.gz"
 
 class Scrapper
 
