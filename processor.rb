@@ -85,14 +85,24 @@ class Formatter
         end
         # wait all threads
         snapshots =[]
+        last = []
         threads.each do |t| 
             $logger.debug "Waiting on thread #{t[:name]}..."
             t.join
             snapshots += t[:snapshots]
+            puts "Thread#{t[:name]} found #{t[:snapshots].size}"
             ## uniqueness by hash_source
             snapshots.uniq! { |e| e[3] }
             ## sort by time
-            snapshots.sort! { |a,b| a[0].to_i <=> b[0].to_i }
+            snapshots.sort! do |a,b| 
+                at = Time.strptime(a[0],"%Y%m%d%H%M%S") 
+                bt = Time.strptime(b[0],"%Y%m%d%H%M%S") 
+                at <=> bt
+            end
+
+            diff = (snapshots - last) | (last - snapshots)
+            last = snapshots
+
         end
         #puts "Time-files made by the threads #{.to_a}"
         snapshots.each do |arr|
