@@ -15,11 +15,52 @@ class Snapshot
     end
 
     def <=> snap
-        self.time <=> snap.time
+        @time <=> snap.time
     end
 
     def time_format
         @str_time
+    end
+
+end
+
+class Package
+    attr_accessor :package
+    attr_accessor :time_format ##
+    attr_accessor :time
+    attr_accessor :version
+    attr_accessor :hash_source
+    attr_accessor :hash_binary
+
+    def initialize time,h
+        @package = h[:package] 
+        @time = Time.parse(time)
+        @time_format = @time.strftime("%Y%m%d%H%M%S")
+        @version = h[:version]
+        @hash_source = h[:hash_source]
+        @hash_binary = h[:hash_binary]
+    end
+
+    def <=> p
+        @time <=> p.time 
+    end
+
+    def hash
+        @package.hash + 
+        @version.hash + 
+        @hash_source.hash + 
+        @hash_binary.hash
+    end
+
+    def eql? o
+        (@package.eql?(o.package)) &&
+            (@version.eql?(o.version)) &&
+            (@hash_source.eql?(o.hash_source)) &&
+            (@hash_binary.eql?(o.hash_binary))
+    end
+
+    def to_s
+       [@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
     end
 
 end
@@ -67,48 +108,38 @@ class Formatter
         RubyUtil::slice(links.keys,Etc.nprocessors) do |times|
             threads << Thread.new(times,idx) do |ttimes,i|
                 Thread.current[:name] = i
-                Thread.current[:snapshots] = []
+                Thread.current[:packages] = []
                 $logger.debug "Started thread on #{ttimes.size}/#{links.keys.size} of the snapshots"
                 ttimes.each do |time|
                     v = links[time]
                     snapshot = process_snapshot time,v[:source],v[:binary]
-                    timeFileName = File.join(@folder,snapshot.time_format)
-                    #append timeFileName,snapshot
-                    snapshot.packages.each do |name,p|
-                        arr = [snapshot.time_format,p[:package],p[:version],p[:hash_source],p[:hash_binary]]
-                        Thread.current[:snapshots] << arr
-                    end
+                    Thread.current[:packages] += snapshot.packages
                 end
-                $logger.debug "Finished processing"
             end
-            idx += 1
+            $logger.debug "Finished processing"
         end
+        idx += 1
         # wait all threads
-        snapshots =[]
+        packages =[]
         last = []
         threads.each do |t| 
             $logger.debug "Waiting on thread #{t[:name]}..."
             t.join
-            snapshots += t[:snapshots]
-            puts "Thread#{t[:name]} found #{t[:snapshots].size}"
+            packages += t[:packages]
+            puts "Thread#{t[:name]} found #{t[:packages].size}"
             ## uniqueness by hash_source
-            snapshots.uniq! { |e| e[3] }
+            packages.uniq!
             ## sort by time
-            snapshots.sort! do |a,b| 
-                at = Time.strptime(a[0],"%Y%m%d%H%M%S") 
-                bt = Time.strptime(b[0],"%Y%m%d%H%M%S") 
-                at <=> bt
+            packages.sort! do |a,b| 
+                a <=> b
             end
 
-            diff = (snapshots - last) | (last - snapshots)
-            last = snapshots
-
+            diff = (packages - last) | (last - packages)
+            last = packages
+            puts "Diff = #{diff}"
         end
         #puts "Time-files made by the threads #{.to_a}"
-        snapshots.each do |arr|
-            @file.write arr.join(",") + "\n"
-        end
-
+        packages.each { |p| @file.write p.to_s }
         @file.close
         $logger.info "Insert #{`cat #{@csv} | wc -l`.strip} lines in the #{@csv}"
     end
@@ -134,18 +165,21 @@ class Formatter
     def process_snapshot time,source,binary
         $logger.info "Processing snapshot @ #{time}"
         packages = {}
+        packagesStruct = []
         nb_source = 0
+        nb_wrongsources = 0
         process_link source do |hash|
             formatted = format_source hash
-            if formatted.nil? || formatted[:package].nil? || formatted[:version].empty? 
-                puts "whuat? hash #{hash} vs #{formatted}"
-                sleep 1
+            if formatted.nil? || formatted[:package].nil? || formatted[:version].empty? || formatted[:hash_source].nil?
+                #puts "whuat? hash #{hash} vs #{formatted}"
+                #sleep 1
+                nb_wrongsources += 1
                 next
             end
             packages[formatted[:package]] =  formatted
             nb_source += 1
         end
-        $logger.debug "Found #{nb_source} sources"
+        $logger.debug "Found #{nb_source} sources & #{nb_wrongsources} wrong format (no sha256)"
 
         nb_binaries = 0
         nb_mismatch = 0
@@ -158,12 +192,12 @@ class Formatter
             end
             p[:hash_binary] = formatted[:hash_binary]
             nb_binaries += 1
+            packagesStruct << Package.new(time,p)
         end
         # only select matching packages source + version
-        packages.delete_if { |k,v| v[:hash_binary].nil? || v[:hash_source].nil? }
         $logger.debug "Found #{nb_binaries} binaries and #{nb_mismatch} mismatches for #{time}"
         #$logger.debug "Example #{packages[packages.keys.first]}"
-        return Snapshot.new(time,packages)
+        return Snapshot.new(time,packagesStruct)
     end
 
     def format_source hash
@@ -188,45 +222,45 @@ class Formatter
     def cache_or_download link
         while true do
             begin
-            $logger.debug "Trying to download #{ link.to_s}"
-            filen = File.join(@cache,extract_date(link) + "_" + extract_file(link))
-            if !File.exists? filen
-                ##out = `wget --quiet #{link.to_s} -O #{filen} --waitretry=2 --retry-connrefused 2>&1`
-                ##raise "error downloading file (exit #{$?})#{filen}: #{out}" unless $?.exitstatus.to_i != 0
-                while true do 
-                    begin
-                        File.open(filen,"w") do |f|
-                            open(link,"User-Agent" => "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.92 Safari/537.36") do |l|
-                                #f.write l.read
-                                IO.copy_stream(l,f)
+                $logger.debug "Trying to download #{ link.to_s}"
+                filen = File.join(@cache,extract_date(link) + "_" + extract_file(link))
+                if !File.exists? filen
+                    ##out = `wget --quiet #{link.to_s} -O #{filen} --waitretry=2 --retry-connrefused 2>&1`
+                    ##raise "error downloading file (exit #{$?})#{filen}: #{out}" unless $?.exitstatus.to_i != 0
+                    while true do 
+                        begin
+                            File.open(filen,"w") do |f|
+                                open(link,"User-Agent" => "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.92 Safari/537.36") do |l|
+                                    #f.write l.read
+                                    IO.copy_stream(l,f)
+                                end
                             end
+                            break
+                        rescue OpenURI::HTTPError 
+                            $logger.info "Error trying to download #{link.to_s}"
+                            sleep 0.2
+                            next
                         end
-                        break
-                    rescue OpenURI::HTTPError 
-                        $logger.info "Error trying to download #{link.to_s}"
-                        sleep 0.2
-                        next
                     end
+                    $logger.debug "File #{filen} has been downloaded"
+                else 
+                    $logger.debug "File #{filen} is already cached"
                 end
-                $logger.debug "File #{filen} has been downloaded"
-            else 
-                $logger.debug "File #{filen} is already cached"
-            end
 
-            #File.open(filen,"r") do |f|
-            #    reader = XZ::StreamReader.new f
-            #    yield reader
-            #    reader.finish
-            #end
-            Zlib::GzipReader.open(filen) do |gz|
-                yield gz
+                #File.open(filen,"r") do |f|
+                #    reader = XZ::StreamReader.new f
+                #    yield reader
+                #    reader.finish
+                #end
+                Zlib::GzipReader.open(filen) do |gz|
+                    yield gz
+                end
+                break
+            rescue => e
+                $logger.debug "Error downloaded #{link.to_s} => #{e}"
+                File.delete(filen)
+                next
             end
-            break
-        rescue => e
-            $logger.debug "Error downloaded #{link.to_s} => #{e}"
-            File.delete(filen)
-            next
-        end
         end
     end
 
@@ -270,5 +304,5 @@ class Formatter
         raise "no file inside link" unless link.to_s.match p
         return $1
     end
-end
 
+end
