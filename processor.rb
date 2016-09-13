@@ -46,10 +46,7 @@ class Package
     end
 
     def hash
-        @package.hash + 
-        @version.hash + 
-        @hash_source.hash + 
-        @hash_binary.hash
+        [@package, @version, @hash_source, @hash_binary].hash
     end
 
     def eql? o
@@ -60,7 +57,7 @@ class Package
     end
 
     def to_s
-       [@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
+        [@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
     end
 
 end
@@ -117,8 +114,8 @@ class Formatter
                 end
             end
             $logger.debug "Finished processing"
+            idx += 1
         end
-        idx += 1
         # wait all threads
         packages =[]
         last = []
@@ -126,16 +123,15 @@ class Formatter
             $logger.debug "Waiting on thread #{t[:name]}..."
             t.join
             packages += t[:packages]
-            puts "Thread#{t[:name]} found #{t[:packages].size}"
-            ## uniqueness by hash_source
+            puts "Thread #{t[:name]} found #{t[:packages].size}"
+            ## uniqueness by name+version+hashES 
+            #packages.uniq! { |p| [p.package,p.version,p.hash_source,p.hash_binary]}
             packages.uniq!
             ## sort by time
-            packages.sort! do |a,b| 
-                a <=> b
-            end
+            packages.sort!
 
             diff = (packages - last) | (last - packages)
-            last = packages
+            last = Array.new(packages)
             puts "Diff = #{diff}"
         end
         #puts "Time-files made by the threads #{.to_a}"
