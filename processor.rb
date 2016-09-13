@@ -107,8 +107,9 @@ class Formatter
                 Thread.current[:name] = i
                 Thread.current[:packages] = []
                 $logger.debug "Started thread on #{ttimes.size}/#{links.keys.size} of the snapshots"
-                ttimes.each do |time|
+                ttimes.each_with_index do |time,j|
                     v = links[time]
+                    $logger.info "Processing snapshot @ #{time} (#{j}/#{ttimes.size})"
                     snapshot = process_snapshot time,v[:source],v[:binary]
                     Thread.current[:packages] += snapshot.packages
                 end
@@ -159,7 +160,6 @@ class Formatter
     ## create_snapshot takes links to source.xz file & binary.xz file. It
     #decompress them, analyzes them and return an snapshot struct
     def process_snapshot time,source,binary
-        $logger.info "Processing snapshot @ #{time}"
         packages = {}
         packagesStruct = []
         nb_source = 0
