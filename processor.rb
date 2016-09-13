@@ -64,36 +64,41 @@ class Formatter
         @file.flush
         threads = []
         idx = 1
-        RubyUtil::partition_by_size(links.keys,Etc.nprocessors) do |times|
+        RubyUtil::slice(links.keys,Etc.nprocessors) do |times|
             threads << Thread.new(times,idx) do |ttimes,i|
                 Thread.current[:name] = i
-                Thread.current[:times] = SortedSet.new
+                Thread.current[:snapshots] = []
                 $logger.debug "Started thread on #{ttimes.size}/#{links.keys.size} of the snapshots"
                 ttimes.each do |time|
                     v = links[time]
                     snapshot = process_snapshot time,v[:source],v[:binary]
                     timeFileName = File.join(@folder,snapshot.time_format)
-                    append timeFileName,snapshot
-                    Thread.current[:times] << snapshot.time
+                    #append timeFileName,snapshot
+                    snapshot.packages.each do |name,p|
+                        arr = [snapshot.time_format,p[:package],p[:version],p[:hash_source],p[:hash_binary]]
+                        Thread.current[:snapshots] << arr
+                    end
                 end
                 $logger.debug "Finished processing"
             end
             idx += 1
         end
         # wait all threads
-        files = SortedSet.new
+        snapshots =[]
         threads.each do |t| 
             $logger.debug "Waiting on thread #{t[:name]}..."
             t.join
-            files = files + t[:times] 
+            snapshots += t[:snapshots]
+            ## uniqueness by hash_source
+            snapshots.uniq! { |e| e[3] }
+            ## sort by time
+            snapshots.sort! { |a,b| a[0].to_i <=> b[0].to_i }
         end
-        puts "Time-files made by the threads #{files.to_a}"
-        # append all files together 
-        files.each do |time|
-            fname = File.join(@folder,time.strftime("%Y%m%d%H%M%S"))
-            IO.copy_stream(open(fname),@file)
-            File.delete fname
+        #puts "Time-files made by the threads #{.to_a}"
+        snapshots.each do |arr|
+            @file.write arr.join(",") + "\n"
         end
+
         @file.close
         $logger.info "Insert #{`cat #{@csv} | wc -l`.strip} lines in the #{@csv}"
     end
