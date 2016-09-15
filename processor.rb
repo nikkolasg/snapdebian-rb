@@ -3,6 +3,8 @@ require 'thread'
 
 require_relative'log'
 
+Thread.abort_on_exception=true
+
 class Snapshot
 
     attr_accessor :packages
@@ -63,9 +65,8 @@ class Package
 end
 
 class Formatter
-    ## TODO correct sha256_orig
     @csv = "snapshots.csv"
-    @checksum_field = "Checksums-Sha256".downcase.to_sym
+    @checksum_field = "files".to_sym
     @source_fields = [:package,:version,:hash_source]
     @binary_fields = [:package,:version,:hash_binary]
     class << self
@@ -92,7 +93,15 @@ class Formatter
         @cache = File.join(@folder,"cache")
         Dir.mkdir @cache unless File.directory? @cache
         @packages = packages
+        @missing = %w{base-files base-passwd debconf debianutils dpkg init-system-helpers lsb sysvinit pcre3 zlib hostname netbase adduser bsdmainutils debian-archive-keyring ucf popularity-contest ifupdown mime-support libxml2 initramfs-tools ca-certificates psmisc tasksel installation-report laptop-detect linux-base xml-core os-prober discover-data dictionaries-common whois bc }
+        #@missing += %w{lsb sysvinit pcre3 zlib libxml2 psmisc bzip2 bc}
+        ### TODO XXX We remove thoses packages as they dont have matching
+        #versions
+        @missing -= %w{lsb sysvinit pcre3 zlib libxml2 psmisc bc}
+        @packages -= %w{lsb sysvinit pcre3 zlib libxml2 psmisc bc}
+        @missing.uniq!
     end
+
 
     ## format takes a [time] => [binarylink,sourceLink]
     # and yields each snapshots once formatted
@@ -103,16 +112,29 @@ class Formatter
         threads = []
         idx = 1
         RubyUtil::slice(links.keys,Etc.nprocessors) do |times|
-            threads << Thread.new(times,idx) do |ttimes,i|
-                Thread.current[:name] = i
-                Thread.current[:packages] = []
-                $logger.debug "Started thread on #{ttimes.size}/#{links.keys.size} of the snapshots"
-                ttimes.each_with_index do |time,j|
-                    v = links[time]
-                    $logger.info "Processing snapshot @ #{time} (#{j}/#{ttimes.size})"
-                    snapshot = process_snapshot time,v[:source],v[:binary]
-                    Thread.current[:packages] += snapshot.packages
+        threads << Thread.new(times,idx) do |ttimes,i|
+            Thread.current[:name] = i
+            Thread.current[:packages] = []
+            $logger.debug "Started thread on #{ttimes.size}/#{links.keys.size} of the snapshots"
+            ttimes.each_with_index do |time,j|
+                v = links[time]
+                $logger.info "Processing snapshot @ #{time} (#{j}/#{ttimes.size})"
+                snapshot = process_snapshot time,v[:source],v[:binary]
+                Thread.current[:packages] += snapshot.packages
+                # verification that all packages are there the first 
+                # snapshot
+                if i == 1 && j == 0
+                    snapNames = snapshot.packages.map {|p| p.package }
+                    set = @packages & snapNames
+                    puts "Checking if first snapshot..."
+                    if set.size != @packages.size
+                        str = "whut? first snapshot has #{snapNames.size} vs packages list #{@packages.size}:" 
+                        puts "Packages missing: \n#{(@packages-set).join(" ")}\n"
+                        raise str
+                    end
+                    puts "First snapshot contains everyhing!"
                 end
+            end
             end
             $logger.debug "Finished processing"
             idx += 1
@@ -135,6 +157,7 @@ class Formatter
             last = Array.new(packages)
             puts "Diff = #{diff}"
         end
+
         #puts "Time-files made by the threads #{.to_a}"
         packages.each { |p| @file.write p.to_s }
         @file.close
@@ -169,6 +192,11 @@ class Formatter
             if formatted.nil? || formatted[:package].nil? || formatted[:version].empty? || formatted[:hash_source].nil?
                 #puts "whuat? hash #{hash} vs #{formatted}"
                 #sleep 1
+                if @missing.include? formatted[:package]
+                    puts "Source missing package: #{formatted}"
+                    puts "Hash origin: #{hash}"
+                    sleep 10
+                end
                 nb_wrongsources += 1
                 next
             end
@@ -184,6 +212,11 @@ class Formatter
             p = packages[formatted[:package]] 
             if p.nil? || p[:version] != formatted[:version]
                 nb_mismatch += 1
+                #if @missing.include? formatted[:package] 
+                #    puts "Binary missing package: #{formatted}"
+                #    puts "Source related: #{p}"
+                #    sleep 10
+                #end
                 next
             end
             p[:hash_binary] = formatted[:hash_binary]
@@ -201,17 +234,29 @@ class Formatter
         hash[Formatter.checksum_field].split("\n").each do |line|
             ## search for the ***.orig.tar.xz file sha256 in hexadecimal
             #followed by anything with "orig.tar" inside
-            next false unless line =~ /(\w{64}).*\orig\.tar.*/
+            next false unless line =~ /(\w{32}).*\.(orig\.)?(tar\.[gx]z||bz2)/
             hash[:hash_source] = $1 
         end
-        hash.delete(Formatter.checksum_field)
+        #hash.delete(Formatter.checksum_field)
         ## take what we need
         slice hash,*Formatter.source_fields
     end
 
     def format_binary hash
-        hash[:hash_binary] = hash[:sha256] 
-        hash.delete(:sha256)
+        if hash.include? Formatter.checksum_field
+            hash[Formatter.checksum_field].split("\n").each do |line|
+                ## search for the ***.orig.tar.xz file sha256 in hexadecimal
+                #followed by anything with "orig.tar" inside
+            next false unless line =~ /(\w{32}).*\.(orig\.)?(tar\.[gx]z||bz2)/
+                hash[:hash_binary] = $1 
+            end
+        elsif hash.include? :md5sum
+            hash[:hash_binary] = hash[:md5sum]
+        else 
+            puts "Searching binary for #{Formatter.checksum_field} in #{hash}"
+            exit 1
+        end
+        #hash.delete(Formatter.checksum_field)
         slice hash,*Formatter.binary_fields
     end
 
@@ -270,9 +315,13 @@ class Formatter
                 obj = {}
                 p.fields do |name,value|
                     n = name.downcase.strip.to_sym
-                    obj[n] = value
+                    obj[n] = value.strip
                 end
                 if @packages && !@packages.empty? && !@packages.include?(obj[:package])
+                    if @missing.include? obj[:package]
+                        puts "Hey I've got one #{obj}"
+                        sleep 10
+                    end
                     nb_skipped += 1
                     next
                 end

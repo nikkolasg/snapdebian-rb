@@ -1,7 +1,6 @@
 attr
 base-files
 base-passwd
-coreutils
 debconf
 debianutils
 diffutils
@@ -10,16 +9,12 @@ findutils
 grep
 gzip
 init-system-helpers
-libselinux
-libsepol
 lsb
 mawk
-pam
 sed
 sysvinit
 pcre3
 perl
-tar
 util-linux
 zlib
 hostname
