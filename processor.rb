@@ -48,18 +48,20 @@ class Package
     end
 
     def hash
-        [@package, @version, @hash_source, @hash_binary].hash
+        #[@package, @version, @hash_source, @hash_binary].hash
+        [@package, @version, @hash_binary].hash
     end
 
     def eql? o
         (@package.eql?(o.package)) &&
             (@version.eql?(o.version)) &&
-            (@hash_source.eql?(o.hash_source)) &&
             (@hash_binary.eql?(o.hash_binary))
+        #    (@hash_source.eql?(o.hash_source)) &&
     end
 
     def to_s
-        [@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
+        #[@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
+        [@time_format,@package,@version,@hash_binary].join(",") + "\n"
     end
 
 end
@@ -93,13 +95,16 @@ class Formatter
         @cache = File.join(@folder,"cache")
         Dir.mkdir @cache unless File.directory? @cache
         @packages = packages
-        @missing = %w{base-files base-passwd debconf debianutils dpkg init-system-helpers lsb sysvinit pcre3 zlib hostname netbase adduser bsdmainutils debian-archive-keyring ucf popularity-contest ifupdown mime-support libxml2 initramfs-tools ca-certificates psmisc tasksel installation-report laptop-detect linux-base xml-core os-prober discover-data dictionaries-common whois bc }
+        #@missing = %w{base-files base-passwd debconf debianutils dpkg init-system-helpers lsb sysvinit pcre3 zlib hostname netbase adduser bsdmainutils debian-archive-keyring ucf popularity-contest ifupdown mime-support libxml2 initramfs-tools ca-certificates psmisc tasksel installation-report laptop-detect linux-base xml-core os-prober discover-data dictionaries-common whois bc }
         #@missing += %w{lsb sysvinit pcre3 zlib libxml2 psmisc bzip2 bc}
         ### TODO XXX We remove thoses packages as they dont have matching
         #versions
-        @missing -= %w{lsb sysvinit pcre3 zlib libxml2 psmisc bc}
-        @packages -= %w{lsb sysvinit pcre3 zlib libxml2 psmisc bc}
-        @missing.uniq!
+        #@missing -= %w{lsb sysvinit pcre3 zlib libxml2 psmisc bc}
+        #@packages -= %w{lsb sysvinit pcre3 zlib libxml2 psmisc bc}
+        #@packages += %w{ debianutils diffutils findutils sed logrotate liblocale-gettext-perl net-tools iptables aptitude bzip2}
+        #@missing.uniq!
+        @missing = %w{pcre3 zlib}
+        @missingFound = []
     end
 
 
@@ -130,6 +135,7 @@ class Formatter
                     if set.size != @packages.size
                         str = "whut? first snapshot has #{snapNames.size} vs packages list #{@packages.size}:" 
                         puts "Packages missing: \n#{(@packages-set).join(" ")}\n"
+                        puts "Packages included skipped: \n#{@missingFound.join(" ")}\n"
                         raise str
                     end
                     puts "First snapshot contains everyhing!"
@@ -180,54 +186,81 @@ class Formatter
         end
         $logger.debug "Wrote snapshot into tmp file #{fileName}"
     end
-    ## create_snapshot takes links to source.xz file & binary.xz file. It
-    #decompress them, analyzes them and return an snapshot struct
-    def process_snapshot time,source,binary
-        packages = {}
-        packagesStruct = []
-        nb_source = 0
-        nb_wrongsources = 0
-        process_link source do |hash|
-            formatted = format_source hash
-            if formatted.nil? || formatted[:package].nil? || formatted[:version].empty? || formatted[:hash_source].nil?
-                #puts "whuat? hash #{hash} vs #{formatted}"
-                #sleep 1
-                if @missing.include? formatted[:package]
-                    puts "Source missing package: #{formatted}"
-                    puts "Hash origin: #{hash}"
-                    sleep 10
-                end
-                nb_wrongsources += 1
-                next
-            end
-            packages[formatted[:package]] =  formatted
-            nb_source += 1
-        end
-        $logger.debug "Found #{nb_source} sources & #{nb_wrongsources} wrong format (no sha256)"
 
-        nb_binaries = 0
-        nb_mismatch = 0
+    ## HACKYISH WAY only take binaries...
+    def process_snapshot time,source,binary
+        packagesStruct = []
         process_link binary do |hash|
             formatted = format_binary hash
-            p = packages[formatted[:package]] 
-            if p.nil? || p[:version] != formatted[:version]
-                nb_mismatch += 1
-                #if @missing.include? formatted[:package] 
-                #    puts "Binary missing package: #{formatted}"
-                #    puts "Source related: #{p}"
-                #    sleep 10
-                #end
-                next
-            end
             p[:hash_binary] = formatted[:hash_binary]
-            nb_binaries += 1
-            packagesStruct << Package.new(time,p)
+            packagesStruct << Package.new(time,formatted)
         end
+        nbBefore = packagesStruct.size
+        packagesStruct.uniq! { |p| p.package }
         # only select matching packages source + version
-        $logger.debug "Found #{nb_binaries} binaries and #{nb_mismatch} mismatches for #{time}"
+        $logger.debug "Found #{packagesStruct.size}/#{nbBefore} binaries"
         #$logger.debug "Example #{packages[packages.keys.first]}"
         return Snapshot.new(time,packagesStruct)
+
     end
+    ## create_snapshot takes links to source.xz file & binary.xz file. It
+    #decompress them, analyzes them and return an snapshot struct
+    ##def process_snapshot time,source,binary
+    ##    packages = {}
+    ##    packagesStruct = []
+    ##    nb_source = 0
+    ##    nb_wrongsources = 0
+    ##    process_link source do |hash|
+    ##        formatted = format_source hash
+    ##        if formatted.nil? || formatted[:package].nil? || formatted[:version].empty? || formatted[:hash_source].nil?
+    ##            #puts "whuat? hash #{hash} vs #{formatted}"
+    ##            #sleep 1
+    ##            if @missing.include? formatted[:package]
+    ##                puts "Source missing package: #{formatted}"
+    ##                puts "Hash origin: #{hash}"
+    ##                @missingFound << hash 
+    ##                sleep 10
+    ##            end
+    ##            nb_wrongsources += 1
+    ##            next
+    ##        end
+    ##        packages[formatted[:package]] =  formatted
+    ##        nb_source += 1
+    ##    end
+    ##    $logger.debug "Found #{nb_source} sources & #{nb_wrongsources} wrong format (no sha256)"
+
+    ##    nb_binaries = 0
+    ##    nb_mismatch = 0
+    ##    process_link binary do |hash|
+    ##        formatted = format_binary hash
+    ##        p = packages[formatted[:package]] 
+    ##        if p.nil? 
+    ##            nb_mismatch += 1
+    ##            if @missing.include? formatted[:package] 
+    ##                puts "Binary missing package: #{formatted}"
+    ##                puts "Source related: #{p}"
+    ##                @missingFound << hash
+    ##                sleep 10
+    ##            end
+    ##            next
+    ##        elsif p[:version] != formatted[:version]
+    ##            puts "Mismatch version #{formatted[:package]} #{formatted[:version]} vs #{p[:version]}"
+    ##            @missingFound << hash
+    ##            sleep 1
+    ##            nb_mismatch += 1
+    ##        
+    ##            next
+    ##        end
+
+    ##        p[:hash_binary] = formatted[:hash_binary]
+    ##        nb_binaries += 1
+    ##        packagesStruct << Package.new(time,p)
+    ##    end
+    ##    # only select matching packages source + version
+    ##    $logger.debug "Found #{nb_binaries} binaries and #{nb_mismatch} mismatches for #{time}"
+    ##    #$logger.debug "Example #{packages[packages.keys.first]}"
+    ##    return Snapshot.new(time,packagesStruct)
+    ##end
 
     def format_source hash
         ## Multiline ...
@@ -297,7 +330,7 @@ class Formatter
                     yield gz
                 end
                 break
-            rescue => e
+            rescue  Zlib::Error,Zlib::GzipFile::Error ,Zlib::GzipFile::NoFooter, Zlib::GzipFile::CRCError, Zlib::GzipFile::LengthError => e
                 $logger.debug "Error downloaded #{link.to_s} => #{e}"
                 File.delete(filen)
                 next

@@ -13,10 +13,8 @@ lsb
 mawk
 sed
 sysvinit
-pcre3
 perl
 util-linux
-zlib
 hostname
 netbase
 adduser
