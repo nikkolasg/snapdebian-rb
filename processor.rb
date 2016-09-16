@@ -172,27 +172,11 @@ class Formatter
 
     private
 
-    def append fileName,snapshot
-        File.open(fileName,"w") do |f|
-            snapshot.packages.each do |p,info|
-                str = [snapshot.time_format,p,info[:version],info[:hash_source],info[:hash_binary]].join(",")
-                if info[:version].nil? || info[:version].empty? || info[:hash_source].nil? || info[:hash_source].empty?
-                    puts "EMPTY #{p} => #{info}"
-                    sleep 1
-                    next
-                end
-                f.write str + "\n"
-            end
-        end
-        $logger.debug "Wrote snapshot into tmp file #{fileName}"
-    end
-
     ## HACKYISH WAY only take binaries...
     def process_snapshot time,source,binary
         packagesStruct = []
         process_link binary do |hash|
             formatted = format_binary hash
-            p[:hash_binary] = formatted[:hash_binary]
             packagesStruct << Package.new(time,formatted)
         end
         nbBefore = packagesStruct.size
