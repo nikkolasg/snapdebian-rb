@@ -66,7 +66,7 @@ class Package
 
     def to_s
         #[@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
-        bin = '"' + @binaries.join(",") + '"'
+        bin = '"' + @binaries.join(" ") + '"'
         [@time_format,@package,@version,@hash_source,bin,@binaries_size.to_s].join(",") + "\n"
     end
 end
