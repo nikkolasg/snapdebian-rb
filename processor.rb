@@ -1,6 +1,5 @@
 require 'ostruct'
 require 'thread'
-require 'version_sorter'
 
 require_relative'log'
 
@@ -147,7 +146,6 @@ class Formatter
                 end
             end
             end
-            $logger.debug "Finished processing"
             idx += 1
         end
         # wait all threads
@@ -183,14 +181,23 @@ class Formatter
         process_link source do |hash|
             formatted = format_source hash
             packagesStruct.merge!({ formatted[:package] => Package.new(time,formatted)}) do |key,old,new|
-                VersionSorter.sort([old,new]) { |p| p.version }.last
+                begin
+                ov = Gem::Version.create(old.version)
+                rescue 
+                    next new
+                end
+                begin
+                nv = Gem::Version.create(new.version)
+                rescue 
+                    next old
+                end
+                ov < nv ? new : old
             end
         end
         nbBefore = packagesStruct.size
         packages = packagesStruct.values
         # only select matching packages source + version
         $logger.debug "Found #{packagesStruct.size}/#{nbBefore} binaries"
-        #$logger.debug "Example #{packages[packages.keys.first]}"
         return Snapshot.new(time,packages)
     end
     ## create_snapshot takes links to source.xz file & binary.xz file. It
