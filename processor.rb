@@ -34,6 +34,7 @@ class Package
     attr_accessor :hash_source
     attr_accessor :hash_binary
     attr_accessor :binaries
+    attr_accessor :binaries_size
 
     def initialize time,h
         @package = h[:package] 
@@ -42,7 +43,8 @@ class Package
         @version = h[:version]
         @hash_source = h[:hash_source]
         @hash_binary = h[:hash_binary]
-        @binaries = h[:binary]
+        @binaries = h[:binaries]
+        @binaries_size = 0
     end
 
     def <=> p
@@ -64,16 +66,16 @@ class Package
 
     def to_s
         #[@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
-        [@time_format,@package,@version,@hash_source,@binaries].join(",") + "\n"
+        bin = '"' + @binaries.join(",") + '"'
+        [@time_format,@package,@version,@hash_source,bin,@binaries_size.to_s].join(",") + "\n"
     end
-
 end
 
 class Formatter
     @csv = "snapshots.csv"
     @checksum_field = "files".to_sym
     @source_fields = [:package,:version,:binary,:hash_source]
-    @binary_fields = [:package,:version,:hash_binary]
+    @binary_fields = [:package,:version,:hash_binary,:size]
     class << self
         attr_accessor :source_fields 
         attr_accessor :binary_fields
@@ -116,7 +118,7 @@ class Formatter
     # and yields each snapshots once formatted
     def format links
         @file = File.open(@csv,"w") 
-        @file.write "time, name, version, hash_source, binaries\n"
+        @file.write "time, name, version, hash_source, binaries, binaries_size\n"
         @file.flush
         semaphore = Mutex.new
         threads = []
@@ -180,6 +182,8 @@ class Formatter
     ## HACKYISH WAY only take binaries...
     def process_snapshot time,source,binary
         packagesStruct = {}
+        # containing all binaries name => source name
+        binariesName = {}
         process_link source do |hash|
             formatted = format_source hash
             packagesStruct.merge!({ formatted[:package] => Package.new(time,formatted)}) do |key,old,new|
@@ -195,6 +199,18 @@ class Formatter
                 end
                 ov < nv ? new : old
             end
+            # every binary name points to the same source name
+            formatted[:binaries].each { |b| binariesName[b] = formatted[:package] }
+        end
+
+        process_link binary,false do |hash|
+            formatted = format_binary hash
+            source = binariesName[formatted[:package]]
+            next unless source
+            package = packagesStruct[source]
+            raise "whut?" unless package
+            ## add the size
+            package.binaries_size += formatted[:size].to_i
         end
         nbBefore = packagesStruct.size
         packages = packagesStruct.values
@@ -204,7 +220,7 @@ class Formatter
     end
     ## create_snapshot takes links to source.xz file & binary.xz file. It
     #decompress them, analyzes them and return an snapshot struct
-    ##def process_snapshot time,source,binary
+    ##def process_snapshot time,source,binarp y
     ##    packages = {}
     ##    packagesStruct = []
     ##    nb_source = 0
@@ -272,7 +288,7 @@ class Formatter
         #hash.delete(Formatter.checksum_field)
         ## take what we need
         h = slice hash,*Formatter.source_fields
-        h[:binary] = '"' + h[:binary].gsub("\n"," ") + '"'
+        h[:binaries] = h[:binary].gsub("\n"," ").split(",").map(&:strip)
         h
     end
 
@@ -341,7 +357,7 @@ class Formatter
 
 
     ## process_link takes a link and a block and yield each paragraphs as objects.
-    def process_link link
+    def process_link link,filter = true
         nb_skipped = 0
         cache_or_download link do |reader|
             parser = DebianControlParser.new reader
@@ -351,7 +367,7 @@ class Formatter
                     n = name.downcase.strip.to_sym
                     obj[n] = value.strip
                 end
-                if @packages && !@packages.empty? && !@packages.include?(obj[:package])
+                if filter && @packages && !@packages.empty? && !@packages.include?(obj[:package])
                     if @missing.include? obj[:package]
                         puts "Hey I've got one #{obj}"
                         sleep 10
