@@ -1,5 +1,6 @@
 require 'ostruct'
 require 'thread'
+require 'version_sorter'
 
 require_relative'log'
 
@@ -59,12 +60,12 @@ class Package
             (@version.eql?(o.version)) &&
             (@binaries.eql?(o.binaries))
             #(@hash_binary.eql?(o.hash_binary))
-        #    (@hash_source.eql?(o.hash_source)) &&
+            (@hash_source.eql?(o.hash_source)) 
     end
 
     def to_s
         #[@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
-        [@time_format,@package,@version,@binaries].join(",") + "\n"
+        [@time_format,@package,@version,@hash_source,@binaries].join(",") + "\n"
     end
 
 end
@@ -116,7 +117,7 @@ class Formatter
     # and yields each snapshots once formatted
     def format links
         @file = File.open(@csv,"w") 
-        @file.write "time, name, version, hash_source, hash_binary\n"
+        @file.write "time, name, version, hash_source, binaries\n"
         @file.flush
         threads = []
         idx = 1
@@ -178,18 +179,19 @@ class Formatter
 
     ## HACKYISH WAY only take binaries...
     def process_snapshot time,source,binary
-        packagesStruct = []
+        packagesStruct = {}
         process_link source do |hash|
             formatted = format_source hash
-            packagesStruct << Package.new(time,formatted)
+            packagesStruct.merge!({ formatted[:package] => Package.new(time,formatted)}) do |key,old,new|
+                VersionSorter.sort([old,new]) { |p| p.version }.last
+            end
         end
         nbBefore = packagesStruct.size
-        packagesStruct.uniq! { |p| p.package }
+        packages = packagesStruct.values
         # only select matching packages source + version
         $logger.debug "Found #{packagesStruct.size}/#{nbBefore} binaries"
         #$logger.debug "Example #{packages[packages.keys.first]}"
-        return Snapshot.new(time,packagesStruct)
-
+        return Snapshot.new(time,packages)
     end
     ## create_snapshot takes links to source.xz file & binary.xz file. It
     #decompress them, analyzes them and return an snapshot struct
