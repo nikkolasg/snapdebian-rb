@@ -33,6 +33,7 @@ class Package
     attr_accessor :version
     attr_accessor :hash_source
     attr_accessor :hash_binary
+    attr_accessor :binaries
 
     def initialize time,h
         @package = h[:package] 
@@ -41,6 +42,7 @@ class Package
         @version = h[:version]
         @hash_source = h[:hash_source]
         @hash_binary = h[:hash_binary]
+        @binaries = h[:binary]
     end
 
     def <=> p
@@ -49,19 +51,20 @@ class Package
 
     def hash
         #[@package, @version, @hash_source, @hash_binary].hash
-        [@package, @version, @hash_binary].hash
+        [@package, @version, @binaries].hash
     end
 
     def eql? o
         (@package.eql?(o.package)) &&
             (@version.eql?(o.version)) &&
-            (@hash_binary.eql?(o.hash_binary))
+            (@binaries.eql?(o.binaries))
+            #(@hash_binary.eql?(o.hash_binary))
         #    (@hash_source.eql?(o.hash_source)) &&
     end
 
     def to_s
         #[@time_format,@package,@version,@hash_source,@hash_binary].join(",") + "\n"
-        [@time_format,@package,@version,@hash_binary].join(",") + "\n"
+        [@time_format,@package,@version,@binaries].join(",") + "\n"
     end
 
 end
@@ -69,7 +72,7 @@ end
 class Formatter
     @csv = "snapshots.csv"
     @checksum_field = "files".to_sym
-    @source_fields = [:package,:version,:hash_source]
+    @source_fields = [:package,:version,:binary,:hash_source]
     @binary_fields = [:package,:version,:hash_binary]
     class << self
         attr_accessor :source_fields 
@@ -103,7 +106,8 @@ class Formatter
         #@packages -= %w{lsb sysvinit pcre3 zlib libxml2 psmisc bc}
         #@packages += %w{ debianutils diffutils findutils sed logrotate liblocale-gettext-perl net-tools iptables aptitude bzip2}
         #@missing.uniq!
-        @missing = %w{pcre3 zlib}
+        #@missing = %w{pcre3 zlib}
+        @missing = []
         @missingFound = []
     end
 
@@ -120,7 +124,7 @@ class Formatter
         threads << Thread.new(times,idx) do |ttimes,i|
             Thread.current[:name] = i
             Thread.current[:packages] = []
-            $logger.debug "Started thread on #{ttimes.size}/#{links.keys.size} of the snapshots"
+            $logger.debug "Started thread with #{ttimes.size}/#{links.keys.size} of the snapshots"
             ttimes.each_with_index do |time,j|
                 v = links[time]
                 $logger.info "Processing snapshot @ #{time} (#{j}/#{ttimes.size})"
@@ -134,11 +138,11 @@ class Formatter
                     puts "Checking if first snapshot..."
                     if set.size != @packages.size
                         str = "whut? first snapshot has #{snapNames.size} vs packages list #{@packages.size}:" 
+                        puts str
                         puts "Packages missing: \n#{(@packages-set).join(" ")}\n"
                         puts "Packages included skipped: \n#{@missingFound.join(" ")}\n"
-                        raise str
+                        #raise str
                     end
-                    puts "First snapshot contains everyhing!"
                 end
             end
             end
@@ -175,8 +179,8 @@ class Formatter
     ## HACKYISH WAY only take binaries...
     def process_snapshot time,source,binary
         packagesStruct = []
-        process_link binary do |hash|
-            formatted = format_binary hash
+        process_link source do |hash|
+            formatted = format_source hash
             packagesStruct << Package.new(time,formatted)
         end
         nbBefore = packagesStruct.size
@@ -251,12 +255,14 @@ class Formatter
         hash[Formatter.checksum_field].split("\n").each do |line|
             ## search for the ***.orig.tar.xz file sha256 in hexadecimal
             #followed by anything with "orig.tar" inside
-            next false unless line =~ /(\w{32}).*\.(orig\.)?(tar\.[gx]z||bz2)/
+            next false unless line =~ /(\w{32}).*\.(orig\.)?(tar\.[gx]z|bz2)/
             hash[:hash_source] = $1 
         end
         #hash.delete(Formatter.checksum_field)
         ## take what we need
-        slice hash,*Formatter.source_fields
+        h = slice hash,*Formatter.source_fields
+        h[:binary] = '"' + h[:binary].gsub("\n"," ") + '"'
+        h
     end
 
     def format_binary hash
@@ -264,7 +270,7 @@ class Formatter
             hash[Formatter.checksum_field].split("\n").each do |line|
                 ## search for the ***.orig.tar.xz file sha256 in hexadecimal
                 #followed by anything with "orig.tar" inside
-            next false unless line =~ /(\w{32}).*\.(orig\.)?(tar\.[gx]z||bz2)/
+            next false unless line =~ /(\w{32}).*\.(orig\.)?(tar\.[gx]z|bz2)/
                 hash[:hash_binary] = $1 
             end
         elsif hash.include? :md5sum

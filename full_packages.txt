@@ -17,6 +17,8 @@ sed
 sysvinit
 util-linux
 debianutils
+zlib
+pcre3
 diffutils
 e2fsprogs
 findutils
