@@ -118,8 +118,12 @@ class Formatter
         @file = File.open(@csv,"w") 
         @file.write "time, name, version, hash_source, binaries\n"
         @file.flush
+        semaphore = Mutex.new
         threads = []
         idx = 1
+        packages =[]
+        last = []
+
         RubyUtil::slice(links.keys,Etc.nprocessors) do |times|
         threads << Thread.new(times,idx) do |ttimes,i|
             Thread.current[:name] = i
@@ -129,42 +133,40 @@ class Formatter
                 v = links[time]
                 $logger.info "Processing snapshot @ #{time} (#{j}/#{ttimes.size})"
                 snapshot = process_snapshot time,v[:source],v[:binary]
-                Thread.current[:packages] += snapshot.packages
-                # verification that all packages are there the first 
-                # snapshot
-                if i == 1 && j == 0
-                    snapNames = snapshot.packages.map {|p| p.package }
-                    set = @packages & snapNames
-                    puts "Checking if first snapshot..."
-                    if set.size != @packages.size
-                        str = "whut? first snapshot has #{snapNames.size} vs packages list #{@packages.size}:" 
-                        puts str
-                        puts "Packages missing: \n#{(@packages-set).join(" ")}\n"
-                        puts "Packages included skipped: \n#{@missingFound.join(" ")}\n"
-                        #raise str
+                semaphore.synchronize {
+                    packages += snapshot.packages
+                    puts "Thread #{Thread.current[:name]} found #{snapshot.packages.size}"
+                    packages.uniq!
+                    packages.sort!
+                    diff = (packages - last) | (last - packages)
+                    last = Array.new(packages)
+                    puts "Diff = #{diff}"
+                    # verification that all packages are there the first 
+                    # snapshot
+                    if i == 1 && j == 0
+                        snapNames = snapshot.packages.map {|p| p.package }
+                        set = @packages & snapNames
+                        puts "Checking if first snapshot..."
+                        if set.size != @packages.size
+                            str = "whut? first snapshot has #{snapNames.size} vs packages list #{@packages.size}:" 
+                            puts str
+                            puts "Packages missing: \n#{(@packages-set).join(" ")}\n"
+                            puts "Packages included skipped: \n#{@missingFound.join(" ")}\n"
+                            #raise str
+                        end
                     end
-                end
+                }
             end
             end
             idx += 1
         end
         # wait all threads
-        packages =[]
-        last = []
         threads.each do |t| 
             $logger.debug "Waiting on thread #{t[:name]}..."
             t.join
-            packages += t[:packages]
-            puts "Thread #{t[:name]} found #{t[:packages].size}"
             ## uniqueness by name+version+hashES 
             #packages.uniq! { |p| [p.package,p.version,p.hash_source,p.hash_binary]}
-            packages.uniq!
             ## sort by time
-            packages.sort!
-
-            diff = (packages - last) | (last - packages)
-            last = Array.new(packages)
-            puts "Diff = #{diff}"
         end
 
         #puts "Time-files made by the threads #{.to_a}"
