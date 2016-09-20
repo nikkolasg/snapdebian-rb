@@ -4,7 +4,7 @@ require 'mechanize'
 ## URLs will be taken such as
 # SNAPSHOT_URL / <timestamp> / PATH / {BINARY_PATH,SOURCE_PATH}
 SNAPSHOT_URL = "http://snapshot.debian.org/archive/debian/"
-PATH = "dists/stretch/main/"
+PATH = "dists/testing/main/"
 BINARY_PATH = "binary-amd64/Packages.gz"
 SOURCE_PATH = "source/Sources.gz"
 
