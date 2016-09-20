@@ -15,9 +15,7 @@ lsb
 mawk
 sed
 sysvinit
-pcre3
 util-linux
-zlib
 debianutils
 diffutils
 e2fsprogs
