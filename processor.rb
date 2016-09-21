@@ -349,7 +349,7 @@ class Formatter
                 break
             rescue  IOError, Zlib::Error,Zlib::GzipFile::Error ,Zlib::GzipFile::NoFooter, Zlib::GzipFile::CRCError, Zlib::GzipFile::LengthError, Exception => e
                 $logger.debug "Error downloaded #{link.to_s} => #{e}"
-                File.delete(filen)
+                #File.delete(filen)
                 next
             end
         end
